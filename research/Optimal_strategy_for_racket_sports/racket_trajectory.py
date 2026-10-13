@@ -86,7 +86,7 @@ class Landings:
 # #############################################################################
 
 
-def _get_flight_time(v0: np.ndarray, theta: np.ndarray, h0: float) -> np.ndarray:
+def get_flight_time(v0: np.ndarray, theta: np.ndarray, h0: float) -> np.ndarray:
     """
     Time of flight until the ball returns to ground level (`z = 0`).
 
@@ -106,7 +106,7 @@ def _get_flight_time(v0: np.ndarray, theta: np.ndarray, h0: float) -> np.ndarray
     return flight_time
 
 
-def _get_height_at(
+def get_height_at(
     x: np.ndarray, v0: np.ndarray, theta: np.ndarray, h0: float
 ) -> np.ndarray:
     """
@@ -129,7 +129,7 @@ def _get_height_at(
     return height
 
 
-def _solve_launch_speed(
+def solve_launch_speed(
     d_target: np.ndarray, theta: np.ndarray, h0: float
 ) -> np.ndarray:
     """
@@ -200,9 +200,9 @@ def get_feasible_launches(
     # Straight-line ground distance from the striker to the target.
     d_target = np.sqrt((x_t - x_s) ** 2 + (y_t - y_s) ** 2)
     # Launch speed required for each candidate angle to reach `d_target`.
-    v0 = _solve_launch_speed(d_target, theta_grid_rad, h0)
+    v0 = solve_launch_speed(d_target, theta_grid_rad, h0)
     # Time of flight for each candidate launch.
-    flight_time = _get_flight_time(v0, theta_grid_rad, h0)
+    flight_time = get_flight_time(v0, theta_grid_rad, h0)
     # Net crossing point along the straight ground track from striker to
     # target: a scalar fraction of `d_target`, independent of theta.
     s_net = -y_s / (y_t - y_s)
@@ -211,7 +211,7 @@ def get_feasible_launches(
     # Lateral (x) position where the trajectory crosses the net.
     x_net = x_s + s_net * (x_t - x_s)
     # Ball height at the net crossing point, for each candidate launch.
-    height_at_net = _get_height_at(d_net, v0, theta_grid_rad, h0)
+    height_at_net = get_height_at(d_net, v0, theta_grid_rad, h0)
     # Net height at the lateral crossing position.
     net_height = racket_params.get_net_height(sport.court, x_net)
     # Vertical clearance over the net (positive means the ball clears it).
@@ -309,7 +309,7 @@ def simulate_landings(
     # Landing point: horizontal distance traveled at the time the ball
     # returns to ground level, along the perturbed azimuth `alpha`.
     # Time of flight for every perturbed trajectory.
-    flight_time = _get_flight_time(v0, theta, h0)
+    flight_time = get_flight_time(v0, theta, h0)
     # Ground distance traveled along the perturbed azimuth.
     d_land = v0 * np.cos(theta) * flight_time
     # Landing x coordinate.
@@ -329,7 +329,7 @@ def simulate_landings(
     # Lateral (x) position where the trajectory crosses the net.
     x_net = x_s - y_s * np.tan(alpha)
     # Ball height at the net crossing point.
-    height_at_net = _get_height_at(d_net, v0, theta, h0)
+    height_at_net = get_height_at(d_net, v0, theta, h0)
     # Net height at the lateral crossing position.
     net_height = racket_params.get_net_height(sport.court, x_net)
     # True where the trajectory clears the net.

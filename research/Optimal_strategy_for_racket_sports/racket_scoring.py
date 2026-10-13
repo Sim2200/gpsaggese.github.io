@@ -251,7 +251,7 @@ def estimate_launch_table(
 # #############################################################################
 
 
-def _compute_reachability(
+def compute_reachability(
     dist_m: np.ndarray,
     flight_time_s: np.ndarray,
     returner: racket_params.PlayerParams,
@@ -278,7 +278,7 @@ def _compute_reachability(
     return reachable
 
 
-def _compute_score(p_in: np.ndarray, reachable: np.ndarray) -> np.ndarray:
+def compute_score(p_in: np.ndarray, reachable: np.ndarray) -> np.ndarray:
     """
     Composite score `S(c) = P_in(c) * (1 - R(c))` (Section IV-D).
 
@@ -318,10 +318,10 @@ def score_targets(
         + (scores["y_m"] - returner_xy[1]) ** 2
     )
     # Compute reachability and composite score for each cell.
-    reachable = _compute_reachability(
+    reachable = compute_reachability(
         dist_m.to_numpy(), scores["flight_time_s"].to_numpy(), returner
     )
-    score = _compute_score(scores["p_in"].to_numpy(), reachable)
+    score = compute_score(scores["p_in"].to_numpy(), reachable)
     scores["reachable"] = reachable
     scores["score"] = score
     # Keep the best angle per cell.
