@@ -3,6 +3,7 @@ Tests for racket_scoring module.
 """
 
 import logging
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -483,19 +484,24 @@ class Test_make_serve_situation(hunitest.TestCase):
     Test `racket_scoring.make_serve_situation()`.
     """
 
-    def helper(self, sport: racket_params.SportParams, side: str) -> None:
+    def helper(
+        self,
+        sport: racket_params.SportParams,
+        side: str,
+        expected_striker_xy: Tuple[float, float],
+    ) -> None:
         """
         Test helper for `make_serve_situation()`: every grid cell center
-        lies in the service box.
+        lies in the service box, and the server stands diagonally across
+        from it.
 
         :param sport: sport parameters to build the serve situation for
         :param side: court side ("deuce" or "ad")
+        :param expected_striker_xy: expected server position (x, y)
         """
         # Prepare inputs.
         server = racket_params.SERVE_PLAYER_TENNIS
         grid_size = 3
-        striker_y_index = 1
-        expected_striker_y_sign = -1
         # Run test.
         situation = racket_scoring.make_serve_situation(sport, server, side)
         targets = racket_scoring.make_target_grid(
@@ -507,18 +513,19 @@ class Test_make_serve_situation(hunitest.TestCase):
             targets["x_m"].to_numpy(), targets["y_m"].to_numpy()
         )
         self.assertTrue(bool(in_box.all()))
-        self.assertLess(
-            situation.striker_xy[striker_y_index], expected_striker_y_sign
-        )
+        np.testing.assert_allclose(situation.striker_xy, expected_striker_xy)
 
     def test1(self) -> None:
         """
-        Test the deuce-side serve situation for tennis.
+        Test the deuce-side serve situation for tennis: the box is at `x <= 0`,
+        so the server stands at `x > 0`.
         """
         # Prepare inputs.
         side = "deuce"
+        # Prepare outputs.
+        expected_striker_xy = (2.0575, -11.885)
         # Run test.
-        self.helper(racket_params.TENNIS, side)
+        self.helper(racket_params.TENNIS, side, expected_striker_xy)
 
     def test2(self) -> None:
         """
@@ -526,14 +533,19 @@ class Test_make_serve_situation(hunitest.TestCase):
         """
         # Prepare inputs.
         side = "deuce"
+        # Prepare outputs.
+        expected_striker_xy = (1.525, -6.705)
         # Run test.
-        self.helper(racket_params.PICKLEBALL, side)
+        self.helper(racket_params.PICKLEBALL, side, expected_striker_xy)
 
     def test3(self) -> None:
         """
-        Test the ad-side serve situation for tennis: edge case of different court side.
+        Test the ad-side serve situation for tennis: the mirror image of
+        deuce, the box is at `x >= 0` and the server at `x < 0`.
         """
         # Prepare inputs.
         side = "ad"
+        # Prepare outputs.
+        expected_striker_xy = (-2.0575, -11.885)
         # Run test.
-        self.helper(racket_params.TENNIS, side)
+        self.helper(racket_params.TENNIS, side, expected_striker_xy)

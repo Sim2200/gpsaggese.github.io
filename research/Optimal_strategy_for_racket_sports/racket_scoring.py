@@ -386,8 +386,9 @@ def make_serve_situation(
     """
     Serve situation: the legal region is the service box (Section IV-E).
 
-    The server stands behind their own baseline, on the same lateral side
-    as the target service box.
+    The server stands behind their own baseline, on the opposite lateral
+    side from the target service box, so the serve crosses the court
+    diagonally.
 
     :param sport: sport parameters, for the court geometry
     :param server: server parameters (contact height, error model)
@@ -396,9 +397,13 @@ def make_serve_situation(
     """
     _LOG.debug(hprint.to_str("sport server serve_side"))
     legal_region = racket_params.get_service_box_region(sport.court, serve_side)
-    # Position server at baseline center, aligned with the service box.
+    # Position the server on the baseline, diagonally across from the box:
+    # the box center mirrored across the center line. A serve must go
+    # cross-court, so the deuce box is at `x <= 0` and the deuce server at
+    # `x > 0` (ad is the mirror image), as in `_get_server_xy()` and
+    # `_check_serve()` of `notebooks/racket_shot_probability_utils.py`.
     x_mid = (legal_region.x_min + legal_region.x_max) / 2
-    striker_xy = (x_mid, -sport.court.length_m / 2)
+    striker_xy = (-x_mid, -sport.court.length_m / 2)
     situation = ShotSituation(
         striker=server, striker_xy=striker_xy, legal_region=legal_region
     )

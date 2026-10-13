@@ -396,10 +396,14 @@ serve_p_in_by_cell = (
     .reset_index()
 )
 _, ax = plt.subplots(figsize=(6, 8))
-utils.plot_court_heatmap(serve_p_in_by_cell, "p_in", racket_params.TENNIS, ax=ax)
+markers = {"Server": serve_situation.striker_xy}
+utils.plot_court_heatmap(
+    serve_p_in_by_cell, "p_in", racket_params.TENNIS, markers=markers, ax=ax
+)
 plt.show()
 # Outcome: P_in is computed only over the deuce service box; cells outside
-# it never appear in the grid.
+# it never appear in the grid. The server stands on the other half of the
+# court (`x > 0`), so the serve crosses the court diagonally.
 
 # %% [markdown]
 # **Interactive exploration**
