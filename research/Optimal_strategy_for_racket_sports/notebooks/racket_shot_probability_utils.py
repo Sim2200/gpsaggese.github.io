@@ -471,7 +471,7 @@ def _draw_fault(
 ) -> None:
     """
     Draw a serve that is a fault: the serve arrow, a red cross where it lands,
-    and a red "Fault" label on player 2's half.
+    and a red "Fault" label on player 2's half, beside the arrow.
 
     :param ax: court axes to draw on
     :param server_xy: where player 1 serves from
@@ -488,16 +488,24 @@ def _draw_fault(
     )
     ax.plot(*server_xy, "o", color="tab:blue", label="player 1")
     ax.plot(*serve_xy, "x", color="tab:red", markersize=10, mew=2, label="fault")
-    # Label in the middle of player 2's half, on a white box so it reads over
-    # the court lines.
+    # Label halfway up player 2's half, on a white box so it reads over the
+    # court lines. The arrow's `x` always stays between the server's and the
+    # landing point's, so the label starts 1 m past that range, on the half
+    # the serve did not land in: it never covers the arrow.
+    arrow_x = (server_xy[0], serve_xy[0])
+    if serve_xy[0] <= 0:
+        # Landed on the left half: the label goes right, growing rightward.
+        label_x, ha = max(arrow_x) + 1.0, "left"
+    else:
+        label_x, ha = min(arrow_x) - 1.0, "right"
     ax.text(
-        0.0,
+        label_x,
         court.length_m / 4,
         "Fault",
         color="tab:red",
         fontsize=20,
         fontweight="bold",
-        ha="center",
+        ha=ha,
         va="center",
         bbox={"facecolor": "white", "edgecolor": "tab:red"},
     )

@@ -774,6 +774,80 @@ class Test__get_server_xy(hunitest.TestCase):
 
 
 # #############################################################################
+# Test__draw_fault
+# #############################################################################
+
+
+class Test__draw_fault(hunitest.TestCase):
+    """
+    Test `racket_shot_probability_utils._draw_fault()`.
+    """
+
+    def helper(
+        self, side: str, serve_xy: Tuple[float, float], expected: str
+    ) -> None:
+        """
+        Test helper for `_draw_fault()`: where the "Fault" label goes.
+
+        :param side: "deuce" or "ad", the side the server serves from
+        :param serve_xy: where the serve lands, `(x1, y1)`
+        :param expected: expected label text, position and alignment
+        """
+        # Prepare inputs.
+        court = racket_params.TENNIS.court
+        server_xy = racket_shot_probability_utils._get_server_xy(side, court)
+        _, ax = plt.subplots()
+        # Run test.
+        racket_shot_probability_utils._draw_fault(ax, server_xy, serve_xy, court)
+        # The label is the only text that is not an arrow.
+        label = [t for t in ax.texts if not isinstance(t, mtext.Annotation)][0]
+        x, y = label.get_position()
+        actual = f"{label.get_text()} at ({x:.2f}, {y:.2f}), ha={label.get_ha()}"
+        plt.close("all")
+        # Check outputs.
+        self.assert_equal(actual, expected)
+
+    def test1(self) -> None:
+        """
+        Test a long deuce serve near the center line: it lands on the left half,
+        so the label starts 1 m right of the server, off the arrow.
+        """
+        # Prepare inputs.
+        side = "deuce"
+        serve_xy = (-0.3, 6.6)
+        # Prepare outputs.
+        expected = "Fault at (1.50, 5.94), ha=left"
+        # Run test and check outputs.
+        self.helper(side, serve_xy, expected)
+
+    def test2(self) -> None:
+        """
+        Test a long ad serve: it lands on the right half, so the label ends 1 m
+        left of the server.
+        """
+        # Prepare inputs.
+        side = "ad"
+        serve_xy = (3.0, 11.8)
+        # Prepare outputs.
+        expected = "Fault at (-1.50, 5.94), ha=right"
+        # Run test and check outputs.
+        self.helper(side, serve_xy, expected)
+
+    def test3(self) -> None:
+        """
+        Test an ad serve into the wrong box, right of the server: the landing
+        point, not the server, is the right end of the arrow.
+        """
+        # Prepare inputs.
+        side = "ad"
+        serve_xy = (-0.2, 3.2)
+        # Prepare outputs.
+        expected = "Fault at (0.80, 5.94), ha=left"
+        # Run test and check outputs.
+        self.helper(side, serve_xy, expected)
+
+
+# #############################################################################
 # Test__build_comments_text
 # #############################################################################
 
