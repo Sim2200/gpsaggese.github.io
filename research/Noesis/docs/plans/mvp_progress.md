@@ -68,3 +68,4 @@
 | 10/6 | Ported into `research/Noesis/` following the repo's conventions; first PR prepared |
 | 10/10 | PR #597 merged: setup, persistent gateway, OpenRouter adapter, routing, logging, and fault injection |
 | 10/11 | PR #604 merged: checker contracts, deterministic grading, evidence/statistics/verdict logic, and persistence |
+| 10/18 | PR_S9: supply adapter turns OpenRouter endpoint prices into one ask per seed seller before each round (`market/supply_adapter.py`, `noesis_platform/supply_feed.py`; D-19–D-21) |

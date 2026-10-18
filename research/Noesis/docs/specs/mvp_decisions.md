@@ -216,3 +216,52 @@
   auction without duplicating M10 orchestration.
 - **Status**: integration through M10's `run_round()` remains pending. This does
   not waive that original acceptance criterion or establish live-provider delivery.
+
+## OpenRouter Supply Adapter (PR_S9)
+
+### D-19. Price an Ask at the Worst-Case Task Cost With Zero Margin
+
+- **Decision**: `p_min` = `prompt_price * 1000 + completion_price * 256`, i.e., the
+  OpenRouter per-token prices times the PRD D1 task caps (≤1,000 prompt and ≤256
+  completion tokens), times `1 + margin` with `margin = 0` by default. Prices are
+  rounded to 1e-9 USD.
+- **Why**: PRD S2 says a seller's `p_min` is the real per-token price times the
+  task size plus a margin; the task size is the D1 definition. Pricing the cap
+  means a seller never sells a task below what it can cost to serve. No margin is
+  specified anywhere in the repo, so the default adds none and the value is a
+  parameter.
+- **Alternatives**: price the measured average token usage of the spike (cheaper
+  asks, but a long prompt would be served at a loss); keep a hardcoded price per
+  seller (the status quo this PR removes).
+
+### D-20. Sellers, Latency, and Reliability Come From the Seed File
+
+- **Decision**: the adapter builds asks only for the sellers in
+  `common/seed.yaml`, matched to OpenRouter endpoints by `provider_slug` (the
+  endpoint `tag`). Each seller's `l_typical` and `r_typical` are stored in the
+  seed, seeded with the p95 latency and ok-rate of
+  `docs/findings/openrouter_spike.md`, until PR_S11's calibration replaces them.
+  Endpoints that belong to no seller are ignored; a seller whose endpoint has left
+  the catalog gets no ask.
+- **Why**: the seed is already the one list of sellers the gateway and checker
+  use; OpenRouter's `latency_last_30m` is time-to-first-token, not the end-to-end
+  latency the contract measures, and its `status` codes are undocumented, so
+  neither is used as a contract term.
+- **Alternatives**: create a seller for every endpoint in the catalog (would add
+  providers the gateway cannot pin or blame); take latency from OpenRouter's
+  30-minute figures (wrong quantity).
+
+### D-21. Re-post One Ask per Seller Before Each Round
+
+- **Decision**: each refresh posts one ask per seller for `n_tasks = 60` in the
+  single `standard` tier; a seller that already has a pending ask in the current
+  round is skipped. The refresh is a function the round scheduler (PR_M7) calls
+  before `clear_round()`; it is not a background loop.
+- **Why**: `OrderBook.clear_round()` drops every order it processes (no standing
+  asks yet, K4), so supply must be re-posted each round; skipping pending sellers
+  keeps a second refresh from doubling supply. 60 is the largest bid the PRD S1
+  simulator posts in one round, so one seller can fill any single bid; OpenRouter
+  publishes no capacity figure to derive it from.
+- **Alternatives**: standing asks that survive clearing (K4, not built);
+  a thread that polls OpenRouter on a timer (adds a second clock next to the
+  scheduler's).

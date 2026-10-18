@@ -19,6 +19,7 @@
 | `batch_call_auction.py` | `Bid`, `Ask`, `OrderBook`, and per-tier uniform-price clearing      | Auction  |
 | `scenarios.py` | Named and seeded bid/ask fixtures | Scenarios |
 | `contract_dispatch.py` | `Contract` schema, `build_contracts()`, and stubbed fulfillment dispatch | Dispatch |
+| `supply_adapter.py` | Pure adapter: OpenRouter endpoint prices -> one `Ask` per seed seller, posted once per round | Supply |
 
 ## Description of Architecture
 
@@ -26,6 +27,9 @@
   `TierClearResult`); not the reverse
 - `OrderBook` keeps its orders behind the `OrderBookStore` interface (in-memory by
   default); the Postgres implementation lives in `noesis_platform/postgres_store.py`
+- `supply_adapter.py` imports `batch_call_auction.py` (`Ask`, `OrderBook`) and takes
+  the OpenRouter catalog as parsed JSON; the HTTP fetch and the seed file live in
+  `noesis_platform/supply_feed.py` (`docs/specs/mvp_decisions.md` D-19–D-21)
 
 ## Deterministic Scenario Families (PR_M11)
 
