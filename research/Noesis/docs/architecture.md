@@ -258,6 +258,31 @@ flowchart LR
     fulfill --> save["ContractStore.save_contract()<br/>(_MarketState.clear_round())"]
 ```
 
+### Supply refresh flow (PR_S9)
+
+- Before a round, `supply_feed.refresh_market_supply()` turns the OpenRouter
+  endpoint catalog into one `Ask` per seller of `common/seed.yaml`:
+  `parse_endpoint_quotes()` reads the per-token prices, `build_asks()` matches
+  sellers to endpoints by tag and prices each ask at the worst-case D1 task cost,
+  and `submit_supply()` queues them on the `OrderBook`, skipping sellers that
+  already have a pending ask in the round
+- `market/supply_adapter.py` is pure; the HTTP fetch and the seed file live in
+  `noesis_platform/supply_feed.py`, so `market/` keeps importing nothing else
+- `clear_round()` drops every order, so the refresh is re-run each round; the
+  scheduler (`PR_M7`) owns catch-and-retry when OpenRouter is unavailable
+
+```mermaid
+flowchart LR
+    openrouter["OpenRouter<br/>GET /models/{id}/endpoints"] --> fetch["fetch_endpoint_catalog()"]
+    seed[("common/seed.yaml<br/>sellers, l_typical, r_typical")] --> load["load_seller_supply()"]
+    fetch --> parse["parse_endpoint_quotes()<br/>EndpointQuote per tag"]
+    parse --> build["build_asks()<br/>p_min = D1 task cost x (1 + margin)"]
+    load --> build
+    build --> submit["submit_supply()<br/>one Ask per seller per round"]
+    submit --> store[("OrderBookStore")]
+    store --> clear["OrderBook.clear_round()"]
+```
+
 ### Scheduled capability-measurement flow
 
 - `prober_cli calibrate` validates the candidate bank before any provider call,
