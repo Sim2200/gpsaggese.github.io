@@ -51,19 +51,20 @@ def _get_catalog() -> Dict[str, Any]:
 
 
 def _get_mock_client(
-    sent: List[httpx.Request], body: Dict[str, Any]
+    sent: List[httpx.Request], body: Dict[str, Any], *, status_code: int = 200
 ) -> httpx.Client:
     """
     Return a client that records each request in `sent` and answers `body`.
 
     :param sent: list the handled requests are appended to
     :param body: JSON body every response carries
+    :param status_code: HTTP status of every response
     :return: client over `httpx.MockTransport`; no network
     """
 
     def _handler(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return httpx.Response(200, json=body)
+        return httpx.Response(status_code, json=body)
 
     client = httpx.Client(transport=httpx.MockTransport(_handler))
     return client
@@ -196,6 +197,37 @@ class Test_fetch_endpoint_catalog(hunitest.TestCase):
         """
         # Run test and check outputs.
         self.helper(api_key, expected)
+
+    def test3(self) -> None:
+        """
+        Test that an OpenRouter error response raises instead of returning a
+        catalog, so no asks are built from it.
+        """
+        # Prepare inputs.
+        sent: List[httpx.Request] = []
+        body = {"error": {"message": "service unavailable"}}
+        http = _get_mock_client(sent, body, status_code=503)
+        # Run test and check outputs.
+        with self.assertRaises(httpx.HTTPStatusError):
+            rnplsufe.fetch_endpoint_catalog(http, _MODEL)
+        http.close()
+        self.assertEqual(len(sent), 1)
+
+    def test4(self) -> None:
+        """
+        Test that a network failure reaching OpenRouter propagates as an
+        `httpx.TransportError`.
+        """
+
+        # Prepare inputs.
+        def _handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused", request=request)
+
+        http = httpx.Client(transport=httpx.MockTransport(_handler))
+        # Run test and check outputs.
+        with self.assertRaises(httpx.TransportError):
+            rnplsufe.fetch_endpoint_catalog(http, _MODEL)
+        http.close()
 
 
 # #############################################################################
