@@ -17,7 +17,7 @@ flowchart LR
     book --> clear["clear_round()<br/>fills at one price"]
 ```
 
-The component diagram is in `architecture.md`, under **Supply refresh flow**.
+The component diagram is in `design.architecture.md`, under **Supply refresh flow**.
 
 ## 1. Prepare the Shell
 
