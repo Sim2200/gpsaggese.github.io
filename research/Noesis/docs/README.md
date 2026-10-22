@@ -32,6 +32,7 @@ placeholder is committed until the reviewed paid run is executed.
 | `plans/plan.Noesis.md` | Protocol implementation roadmap (`PR_M*`, `PR_S*`, `PR_P*`)     | Plans      |
 | `plans/plan.marketing.md` | Bootstrapping supply and demand liquidity                    | Plans      |
 | `plans/plan.reorg.md` | Issue plan: reorganize the dir into components                   | Plans      |
+| `run_market_supply_demo.how_to_guide.md` | Commands that show OpenRouter prices becoming asks and clearing against a bid | Demo |
 | `specs/mvp_prd.md`  | MVP product requirements                                           | Specs      |
 | `specs/mvp_decisions.md` | MVP decisions and the alternatives considered                 | Specs      |
 | `specs/spec.PR_P2.md` | Implementation spec: containerized cloud deployment              | Specs      |

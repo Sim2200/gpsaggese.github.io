@@ -5,6 +5,7 @@
 - Cleared fills become `Contract`s, dispatched to a stubbed fulfillment layer
 - `market/` imports no other Noesis component
 - Code walkthrough: `docs/notes/explain_code.batch_call_auction.md`
+- Supply demo: `docs/run_market_supply_demo.how_to_guide.md`
 
 ## Structure of the Dir
 
