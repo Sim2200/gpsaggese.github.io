@@ -74,6 +74,7 @@ class ExecutionEnv(gym.Env):
         _LOG.debug(hprint.to_str("config"))
         # Fill the missing parameters from the defaults.
         cfg = {**DEFAULT_CONFIG, **(config or {})}
+        # Cast the config values to fixed types for the arithmetic below.
         self.total_shares = float(cfg["total_shares"])
         self.n_steps = int(cfg["n_steps"])
         self.s0 = float(cfg["s0"])
@@ -109,11 +110,15 @@ class ExecutionEnv(gym.Env):
         _LOG.debug(hprint.to_str("seed"))
         # Seed `self.np_random`, which draws the price shocks.
         super().reset(seed=seed)
+        # Track the episode state: time index, inventory, price, and shortfall.
         self.t = 0
         self.inventory = self.total_shares
         self.price = self.s0
         self.shortfall_bps = 0.0
-        return self._obs(), {}
+        # Build the first observation.
+        obs = self._obs()
+        _LOG.debug("return=%s", obs)
+        return obs, {}
 
     def step(
         self, action: int
@@ -124,6 +129,8 @@ class ExecutionEnv(gym.Env):
         :param action: index into `action_fractions`
         :return: observation, reward, terminated, truncated, info
         """
+        _LOG.debug("action=%s", action)
+        # Convert the action index into shares of the remaining inventory.
         shares = self.action_fractions[int(action)] * self.inventory
         return self.step_shares(shares)
 
@@ -140,6 +147,7 @@ class ExecutionEnv(gym.Env):
         """
         # Use lazy formatting since this runs at every step of training.
         _LOG.debug("t=%s shares=%s inventory=%s", self.t, shares, self.inventory)
+        # Never sell more than the remaining inventory.
         shares = float(np.clip(shares, 0.0, self.inventory))
         # Sell everything left at the last step.
         if self.t == self.n_steps - 1:
@@ -151,14 +159,18 @@ class ExecutionEnv(gym.Env):
         # value.
         cost = (self.s0 - exec_price) * shares
         reward = -cost / (self.s0 * self.total_shares) * 1e4
+        # Accumulate the shortfall: the sum of the step costs in bps.
         self.shortfall_bps -= reward
         self.inventory -= shares
         # Apply the permanent impact, then the price shock.
         shock = self.np_random.standard_normal()
+        # The `-0.5 * step_vol**2` drift makes the shock mean-one, so only the
+        # impact moves the expected price.
         self.price *= (1.0 - self.gamma * frac) * np.exp(
             self.step_vol * shock - 0.5 * self.step_vol**2
         )
         self.t += 1
+        # Episodes end by termination only, never by truncation.
         terminated = self.t >= self.n_steps
         info = {
             "shares": shares,
@@ -174,7 +186,8 @@ class ExecutionEnv(gym.Env):
 
         :return: [time left, inventory left, log(S_t / s0) / daily_vol]
         """
-        return np.array(
+        # Normalize time and inventory to [0, 1], as in `observation_space`.
+        obs = np.array(
             [
                 1.0 - self.t / self.n_steps,
                 self.inventory / self.total_shares,
@@ -183,6 +196,8 @@ class ExecutionEnv(gym.Env):
             ],
             dtype=np.float32,
         )
+        _LOG.debug("return=%s", obs)
+        return obs
 
 
 # #############################################################################
@@ -197,7 +212,12 @@ def twap_shares(env: ExecutionEnv) -> float:
     :param env: environment in the current state
     :return: shares to sell at this step
     """
-    return env.inventory / (env.n_steps - env.t)
+    # Use lazy formatting since this runs at every step of each episode.
+    _LOG.debug("t=%s inventory=%s", env.t, env.inventory)
+    # Spread the remaining inventory evenly over the remaining steps.
+    shares = env.inventory / (env.n_steps - env.t)
+    _LOG.debug("return=%s", shares)
+    return shares
 
 
 def sell_all_shares(env: ExecutionEnv) -> float:
@@ -207,7 +227,12 @@ def sell_all_shares(env: ExecutionEnv) -> float:
     :param env: environment in the current state
     :return: shares to sell at this step
     """
-    return env.inventory
+    # Use lazy formatting since this runs at every step of each episode.
+    _LOG.debug("t=%s inventory=%s", env.t, env.inventory)
+    # Return the whole inventory, which is zero after the first step.
+    shares = env.inventory
+    _LOG.debug("return=%s", shares)
+    return shares
 
 
 def run_baseline(
@@ -227,14 +252,18 @@ def run_baseline(
     :return: shortfall in bps for each episode
     """
     _LOG.debug(hprint.to_str("schedule config n_episodes seed"))
+    # Build one environment and reset it for each episode.
     env = ExecutionEnv(config)
+    # Preallocate the shortfall of each episode.
     shortfalls = np.empty(n_episodes)
     for i in range(n_episodes):
         # Use a different seed per episode so each one gets its own price path.
         env.reset(seed=seed + i)
         terminated = False
+        # Trade on the schedule until the episode terminates.
         while not terminated:
             _, _, terminated, _, info = env.step_shares(schedule(env))
+        # The info of the last step holds the episode shortfall.
         shortfalls[i] = info["shortfall_bps"]
     _LOG.debug("return=%s", shortfalls[:5])
     return shortfalls

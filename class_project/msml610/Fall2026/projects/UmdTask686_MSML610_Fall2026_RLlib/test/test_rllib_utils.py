@@ -18,42 +18,47 @@ _LOG = logging.getLogger(__name__)
 _NO_NOISE_CONFIG = {**rlutils.DEFAULT_CONFIG, "daily_vol": 1e-12, "gamma": 0.0}
 
 
-def _run_episode(
-    env: rlutils.ExecutionEnv, action: int, seed: int
-) -> Tuple[int, float, Dict[str, Any]]:
-    """
-    Run one episode taking the same action at every step.
-
-    :param env: environment to run
-    :param action: action taken at every step
-    :param seed: seed of the price path
-    :return: number of steps, total reward, info of the last step
-    """
-    env.reset(seed=seed)
-    n_steps = 0
-    total_reward = 0.0
-    terminated = False
-    while not terminated:
-        _, reward, terminated, _, info = env.step(action)
-        n_steps += 1
-        total_reward += reward
-    return n_steps, total_reward, info
-
-
 # #############################################################################
 # Test_ExecutionEnv
 # #############################################################################
 
 
 class Test_ExecutionEnv(hunitest.TestCase):
+    """
+    Test `rllib_utils.ExecutionEnv` class.
+    """
+
+    def helper(
+        self, env: rlutils.ExecutionEnv, action: int, seed: int
+    ) -> Tuple[int, float, Dict[str, Any]]:
+        """
+        Run one episode taking the same action at every step.
+
+        :param env: environment to run
+        :param action: action taken at every step
+        :param seed: seed of the price path
+        :return: number of steps, total reward, info of the last step
+        """
+        env.reset(seed=seed)
+        n_steps = 0
+        total_reward = 0.0
+        terminated = False
+        # Step until the episode terminates, accumulating the reward.
+        while not terminated:
+            _, reward, terminated, _, info = env.step(action)
+            n_steps += 1
+            total_reward += reward
+        return n_steps, total_reward, info
+
     def test1(self) -> None:
         """
         Check that the environment follows the Gymnasium API.
         """
         # Prepare inputs.
         env = rlutils.ExecutionEnv()
-        # Run test.
-        genvche.check_env(env, skip_render_check=True)
+        skip_render_check = True
+        # Run test and check outputs.
+        genvche.check_env(env, skip_render_check=skip_render_check)
 
     def test2(self) -> None:
         """
@@ -64,11 +69,12 @@ class Test_ExecutionEnv(hunitest.TestCase):
         # Action 0 sells nothing.
         action = 0
         seed = 0
+        # Prepare outputs.
+        expected = "n_steps=20 inventory=0.0"
         # Run test.
-        n_steps, _, _ = _run_episode(env, action, seed)
+        n_steps, _, _ = self.helper(env, action, seed)
         # Check outputs.
         actual = f"n_steps={n_steps} inventory={env.inventory}"
-        expected = "n_steps=20 inventory=0.0"
         self.assert_equal(actual, expected)
 
     def test3(self) -> None:
@@ -81,7 +87,7 @@ class Test_ExecutionEnv(hunitest.TestCase):
         action = 3
         seed = 1
         # Run test.
-        _, total_reward, info = _run_episode(env, action, seed)
+        _, total_reward, info = self.helper(env, action, seed)
         # Check outputs.
         actual = f"{total_reward:.6f}"
         expected = f"{-info['shortfall_bps']:.6f}"
@@ -94,6 +100,10 @@ class Test_ExecutionEnv(hunitest.TestCase):
 
 
 class Test_run_baseline(hunitest.TestCase):
+    """
+    Test `rllib_utils.run_baseline()` function.
+    """
+
     def helper(self, schedule: Any, n_slices: int) -> None:
         """
         Check the shortfall of `schedule` without price noise.
@@ -146,12 +156,15 @@ class Test_run_baseline(hunitest.TestCase):
         """
         # Prepare inputs.
         n_episodes = 200
+        twap_schedule = rlutils.twap_shares
+        sell_all_schedule = rlutils.sell_all_shares
+        # Prepare outputs.
+        expected = "True"
         # Run test.
-        twap = rlutils.run_baseline(rlutils.twap_shares, n_episodes=n_episodes)
+        twap = rlutils.run_baseline(twap_schedule, n_episodes=n_episodes)
         sell_all = rlutils.run_baseline(
-            rlutils.sell_all_shares, n_episodes=n_episodes
+            sell_all_schedule, n_episodes=n_episodes
         )
         # Check outputs.
         actual = str(twap.mean() < sell_all.mean())
-        expected = "True"
         self.assert_equal(actual, expected)

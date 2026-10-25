@@ -27,6 +27,7 @@ def _get_bars(
     :param closes: close price of each bar
     :return: bars indexed by UTC timestamp
     """
+    # Localize the timestamps to New York, since they are local exchange times.
     index = pd.DatetimeIndex(timestamps).tz_localize("America/New_York")
     df = pd.DataFrame(
         {"open": opens, "close": closes, "volume": 1.0},
@@ -41,11 +42,16 @@ def _get_bars(
 
 
 class Test_filter_regular_hours(hunitest.TestCase):
+    """
+    Test `data_utils.filter_regular_hours()` function.
+    """
+
     def test1(self) -> None:
         """
         Check that only bars in [9:30, 16:00) New York time are kept.
         """
         # Prepare inputs.
+        # Bars just before and at each boundary of the regular session.
         timestamps = [
             "2020-03-02 09:29",
             "2020-03-02 09:30",
@@ -54,12 +60,13 @@ class Test_filter_regular_hours(hunitest.TestCase):
         ]
         prices = [1.0, 1.0, 1.0, 1.0]
         bars = _get_bars(timestamps, prices, prices)
+        # Prepare outputs.
+        expected = "['09:30', '15:59']"
         # Run test.
         df = rldautil.filter_regular_hours(bars)
         # Check outputs.
         ny_time = df.index.tz_convert("America/New_York")
         actual = str(list(ny_time.strftime("%H:%M")))
-        expected = "['09:30', '15:59']"
         self.assert_equal(actual, expected)
 
 
@@ -69,6 +76,10 @@ class Test_filter_regular_hours(hunitest.TestCase):
 
 
 class Test_calibrate(hunitest.TestCase):
+    """
+    Test `data_utils.calibrate()` function.
+    """
+
     def test1(self) -> None:
         """
         Check the volatility, volume, and impact on two days of bars.
@@ -90,7 +101,8 @@ class Test_calibrate(hunitest.TestCase):
         daily_vol = np.std([np.log(1.01), np.log(0.99)], ddof=1)
         expected = (
             f"daily_vol={daily_vol:.6f} adv=2.0 "
-            f"gamma={0.314 * daily_vol:.6f} eta={0.142 * daily_vol * 20:.6f}"
+            f"gamma={0.314 * daily_vol:.6f} "
+            f"eta={0.142 * daily_vol * n_steps:.6f}"
         )
         # Run test.
         params = rldautil.calibrate(bars, n_steps, total_shares)

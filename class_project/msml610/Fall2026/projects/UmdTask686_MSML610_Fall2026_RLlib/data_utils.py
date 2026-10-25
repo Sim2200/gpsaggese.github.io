@@ -46,7 +46,9 @@ def _get_spy_path(year: int) -> str:
     :param year: calendar year
     :return: parquet file path in `DATA_DIR`
     """
+    _LOG.debug(hprint.to_str("year"))
     path = os.path.join(DATA_DIR, f"spy_1min_{year}.parquet")
+    _LOG.debug("return=%s", path)
     return path
 
 
@@ -81,6 +83,7 @@ def _get_with_retry(
     :return: decoded JSON response
     """
     _LOG.debug(hprint.to_str("url params"))
+    # Retry up to 5 times on rate limits; `data` stays `None` if all fail.
     data = None
     for attempt in range(5):
         resp = requests.get(url, params=params, headers=headers, timeout=60)
@@ -95,6 +98,7 @@ def _get_with_retry(
         break
     if data is None:
         raise RuntimeError(f"Too many retries for '{url}'")
+    _LOG.debug("return=%s", list(data))
     return data
 
 
@@ -111,6 +115,7 @@ def download_spy_minute_bars(year: int) -> pd.DataFrame:
     """
     _LOG.debug(hprint.to_str("year"))
     headers = _get_alpaca_headers()
+    # Query one calendar year of bars, fetched in pages of `limit` bars.
     params: Dict[str, Any] = {
         "symbols": "SPY",
         "timeframe": "1Min",
@@ -143,9 +148,11 @@ def download_spy_minute_bars(year: int) -> pd.DataFrame:
             "vw": "vwap",
         }
     )
+    # Index by UTC timestamp and sort it, so the bars are in time order.
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     df = df.set_index("timestamp").sort_index()
     _LOG.info("Downloaded '%s' bars for '%s'", len(df), year)
+    _LOG.debug("return=%s", df.shape)
     return df
 
 
@@ -159,10 +166,14 @@ def filter_regular_hours(df: pd.DataFrame) -> pd.DataFrame:
     _LOG.debug(hprint.to_str("df.shape"))
     # Compare the local exchange time, which handles daylight saving.
     ny_time = df.index.tz_convert("America/New_York")
+    # Bars are labeled by their start time, so the 9:30 bar is kept and the
+    # 16:00 bar is dropped.
     mask = (ny_time.time >= pd.Timestamp("09:30").time()) & (
         ny_time.time < pd.Timestamp("16:00").time()
     )
-    return df[mask]
+    filtered = df[mask]
+    _LOG.debug("return=%s rows", len(filtered))
+    return filtered
 
 
 def download_spy(start_year: int, end_year: int) -> None:
@@ -175,6 +186,7 @@ def download_spy(start_year: int, end_year: int) -> None:
     :param end_year: last year, included
     """
     _LOG.debug(hprint.to_str("start_year end_year"))
+    # Create the data dir, if needed.
     os.makedirs(DATA_DIR, exist_ok=True)
     for year in range(start_year, end_year + 1):
         path = _get_spy_path(year)
@@ -182,6 +194,7 @@ def download_spy(start_year: int, end_year: int) -> None:
         if os.path.exists(path):
             _LOG.info("Skipping '%s'", path)
             continue
+        # Download and cache one year as parquet.
         df = download_spy_minute_bars(year)
         df.to_parquet(path)
         _LOG.info("Saved '%s'", path)
@@ -196,6 +209,7 @@ def load_spy(start_year: int, end_year: int) -> pd.DataFrame:
     :return: bars indexed by UTC timestamp
     """
     _LOG.debug(hprint.to_str("start_year end_year"))
+    # Read the yearly parquet files written by `download_spy()`.
     dfs = [
         pd.read_parquet(_get_spy_path(year))
         for year in range(start_year, end_year + 1)
@@ -215,14 +229,18 @@ def download_vix() -> None:
     """
     Download the VIX daily close from FRED into `DATA_DIR`.
     """
+    _LOG.debug(hprint.to_str("_FRED_CSV_URL"))
+    # Create the data dir, if needed.
     os.makedirs(DATA_DIR, exist_ok=True)
     # The FRED CSV endpoint needs no API key.
     resp = requests.get(_FRED_CSV_URL, timeout=60)
     resp.raise_for_status()
+    # Parse the dates and rename the columns to short names.
     df = pd.read_csv(io.StringIO(resp.text), parse_dates=["observation_date"])
     df = df.rename(columns={"observation_date": "date", "VIXCLS": "vix"})
     # FRED leaves holidays empty.
     df = df.dropna().set_index("date")
+    # Cache the VIX close as parquet for `load_vix()`.
     df.to_parquet(_VIX_PATH)
     _LOG.info("Saved '%s' rows to '%s'", len(df), _VIX_PATH)
 
@@ -233,7 +251,9 @@ def load_vix() -> pd.Series:
 
     :return: VIX indexed by date
     """
+    # Read the file written by `download_vix()`.
     df = pd.read_parquet(_VIX_PATH)
+    # Keep only the VIX close column.
     vix = df["vix"]
     _LOG.debug("return=%s rows", len(vix))
     return vix
@@ -274,6 +294,7 @@ def calibrate(
     _LOG.debug(hprint.to_str("n_steps total_shares"))
     # Aggregate the minute bars into one row per trading day.
     day = pd.Index(bars.index.tz_convert("America/New_York").date, name="date")
+    # Open is the first bar's open, close is the last bar's close.
     daily = pd.DataFrame(
         {
             "open": bars["open"].groupby(day).first(),
@@ -281,18 +302,21 @@ def calibrate(
             "volume": bars["volume"].groupby(day).sum(),
         }
     )
+    # Daily volatility is the std of the open-to-close log return.
     oc_ret = np.log(daily["close"] / daily["open"])
     daily_vol = float(oc_ret.std())
     adv = float(daily["volume"].mean())
     params = {
         "daily_vol": daily_vol,
         "adv": adv,
+        # Use the mean daily close as the arrival price `s0`.
         "s0": float(daily["close"].mean()),
         "gamma": _ATHL_GAMMA * daily_vol,
         # Trading `n` shares in a step of `1 / n_steps` days is a rate of
         # `n_steps * n / V`, so the per-step coefficient scales by `n_steps`.
         "eta": _ATHL_ETA * daily_vol * n_steps,
         "n_days": float(len(daily)),
+        # Order size as a percentage of ADV.
         "shares_pct_adv": 100.0 * total_shares / adv,
     }
     _LOG.debug("return=%s", params)
@@ -316,11 +340,14 @@ def compute_m1_table(
     :return: one column per period with the calibration and the shortfall
     """
     _LOG.debug(hprint.to_str("periods n_episodes"))
+    # Use the environment defaults for the order size and the step count.
     total_shares = rlutils.DEFAULT_CONFIG["total_shares"]
     n_steps = rlutils.DEFAULT_CONFIG["n_steps"]
     columns = {}
     for name, (start_year, end_year) in periods.items():
+        # Calibrate on the period's years.
         params = calibrate(load_spy(start_year, end_year), n_steps, total_shares)
+        # Keep only the parameters that `ExecutionEnv` reads.
         config = {k: params[k] for k in ("daily_vol", "adv", "s0", "gamma", "eta")}
         # Run both baselines on the same seeds, so they see the same paths.
         twap = rlutils.run_baseline(
@@ -329,6 +356,7 @@ def compute_m1_table(
         sell_all = rlutils.run_baseline(
             rlutils.sell_all_shares, config=config, n_episodes=n_episodes
         )
+        # Format each metric as a display string for the table.
         columns[name] = {
             "Trading days": f"{params['n_days']:.0f}",
             "Open-to-close daily vol (%)": f"{100 * params['daily_vol']:.2f}",
@@ -343,6 +371,7 @@ def compute_m1_table(
                 f"{sell_all.mean():.2f} ± {sell_all.std():.2f}"
             ),
         }
+    # One row per metric and one column per period.
     df = pd.DataFrame(columns)
     _LOG.debug("return=\n%s", df)
     return df
