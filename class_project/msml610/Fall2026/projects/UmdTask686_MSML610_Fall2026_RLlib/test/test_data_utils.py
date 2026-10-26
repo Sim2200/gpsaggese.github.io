@@ -112,3 +112,53 @@ class Test_calibrate(hunitest.TestCase):
             f"gamma={params['gamma']:.6f} eta={params['eta']:.6f}"
         )
         self.assert_equal(actual, expected)
+
+
+# #############################################################################
+# Test_fit_permanent_impact
+# #############################################################################
+
+
+class Test_fit_permanent_impact(hunitest.TestCase):
+    """
+    Test `data_utils.fit_permanent_impact()` function.
+    """
+
+    def test1(self) -> None:
+        """
+        Check that `gamma` is recovered when the midpoint follows the flow.
+        """
+        # Prepare inputs.
+        # Two days of 4 bars, one bar per bucket. Each bucket's log return is
+        # `0.5 * flow / adv`, so the fit is exact.
+        timestamps = [
+            "2020-03-02 09:30",
+            "2020-03-02 09:31",
+            "2020-03-02 09:32",
+            "2020-03-02 09:33",
+            "2020-03-03 09:30",
+            "2020-03-03 09:31",
+            "2020-03-03 09:32",
+            "2020-03-03 09:33",
+        ]
+        prices = [100.0] * len(timestamps)
+        bars = _get_bars(timestamps, prices, prices)
+        adv = 1000.0
+        flows = np.array([0.0, 100.0, -50.0, 20.0, 0.0, -80.0, 10.0, 60.0])
+        bars["signed_volume"] = flows
+        # Build the midpoints from the returns, restarting at 100 each day.
+        log_mid = np.concatenate(
+            [np.cumsum(0.5 * flows[:4] / adv), np.cumsum(0.5 * flows[4:] / adv)]
+        )
+        bars["close_mid"] = 100.0 * np.exp(log_mid)
+        n_steps = 4
+        # Prepare outputs.
+        expected = "gamma=0.500000 r2=1.000000 n_obs=6"
+        # Run test.
+        fit = rldautil.fit_permanent_impact(bars, n_steps, adv)
+        # Check outputs.
+        actual = (
+            f"gamma={fit['gamma']:.6f} r2={fit['r2']:.6f} "
+            f"n_obs={fit['n_obs']:.0f}"
+        )
+        self.assert_equal(actual, expected)

@@ -152,6 +152,24 @@ class Test_run_baseline(hunitest.TestCase):
 
     def test3(self) -> None:
         """
+        Check that the half spread adds to the sell-all cost.
+        """
+        # Prepare inputs.
+        cfg = {**_NO_NOISE_CONFIG, "half_spread_bps": 1.5}
+        n_episodes = 1
+        # Prepare outputs.
+        impact_bps = cfg["eta"] * cfg["total_shares"] / cfg["adv"] * 1e4
+        expected = f"{impact_bps + 1.5:.6f}"
+        # Run test.
+        shortfall = rlutils.run_baseline(
+            rlutils.sell_all_shares, config=cfg, n_episodes=n_episodes
+        )
+        # Check outputs.
+        actual = f"{shortfall[0]:.6f}"
+        self.assert_equal(actual, expected)
+
+    def test4(self) -> None:
+        """
         Check that TWAP has a lower mean shortfall than sell-all with noise.
         """
         # Prepare inputs.

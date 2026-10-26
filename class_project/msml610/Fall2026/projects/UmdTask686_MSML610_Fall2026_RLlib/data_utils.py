@@ -2,6 +2,7 @@
 Download the data for the RLlib Optimal Trade Execution project.
 
 - SPY 1-minute bars from the Alpaca market data API (available from 2016)
+  or from NYSE TAQ on WRDS (`taq_utils.py`)
 - VIX daily close from FRED
 - Calibration of the `ExecutionEnv` parameters and the M1 table
 
@@ -17,13 +18,14 @@ import io
 import logging
 import os
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 import requests
 
 import class_project.msml610.Fall2026.projects.UmdTask686_MSML610_Fall2026_RLlib.rllib_utils as rlutils
+import class_project.msml610.Fall2026.projects.UmdTask686_MSML610_Fall2026_RLlib.taq_utils as rltautil
 import helpers.hprint as hprint
 
 _LOG = logging.getLogger(__name__)
@@ -285,6 +287,8 @@ def calibrate(
     - `adv`: mean regular-hours volume per day
     - `gamma`, `eta`: impact coefficients scaled by `daily_vol`, with each step
       lasting `1 / n_steps` of a day
+    - `half_spread_bps`: half the volume-weighted effective spread, if the
+      bars have `effective_spread_bps` (TAQ bars), otherwise 0
 
     :param bars: regular-hours 1-minute bars indexed by UTC timestamp
     :param n_steps: trading steps in one day
@@ -318,9 +322,74 @@ def calibrate(
         "n_days": float(len(daily)),
         # Order size as a percentage of ADV.
         "shares_pct_adv": 100.0 * total_shares / adv,
+        "half_spread_bps": 0.0,
     }
+    if "effective_spread_bps" in bars:
+        # Weight each minute by its volume, like the cost of a share traded.
+        # Minutes without a regular trade have no spread.
+        has_spread = bars["effective_spread_bps"].notna()
+        spread = np.average(
+            bars.loc[has_spread, "effective_spread_bps"],
+            weights=bars.loc[has_spread, "reg_volume"],
+        )
+        params["half_spread_bps"] = float(spread) / 2
     _LOG.debug("return=%s", params)
     return params
+
+
+def fit_permanent_impact(
+    bars: pd.DataFrame, n_steps: int, adv: float
+) -> Dict[str, float]:
+    """
+    Fit the permanent impact `gamma` on the signed volume of TAQ bars.
+
+    Each day is split into `n_steps` buckets, like the steps of
+    `ExecutionEnv`. The log return of the NBBO midpoint over each bucket is
+    regressed on the bucket's signed volume as a fraction of `adv`:
+    `ret = a + gamma * signed_volume / adv`. The first bucket of each day has
+    no return, since the overnight gap is not part of the episode.
+
+    :param bars: TAQ 1-minute bars with `close_mid` and `signed_volume`
+    :param n_steps: trading steps in one day
+    :param adv: average daily volume in shares
+    :return: `gamma`, its t-statistic, the R^2, and the number of buckets
+    """
+    _LOG.debug(hprint.to_str("n_steps adv"))
+    day = bars.index.tz_convert("America/New_York").date
+    # Assign each minute to one of `n_steps` buckets of its day, which also
+    # works on half days.
+    pos = bars.groupby(day).cumcount().to_numpy()
+    n_bars = bars.groupby(day)["close_mid"].transform("size").to_numpy()
+    bucket = pos * n_steps // n_bars
+    grouped = bars.groupby([day, bucket])
+    df = pd.DataFrame(
+        {
+            "mid": grouped["close_mid"].last(),
+            "flow": grouped["signed_volume"].sum() / adv,
+        }
+    )
+    # Return from the previous bucket's last midpoint, within each day.
+    df["ret"] = np.log(df["mid"]).groupby(level=0).diff()
+    df = df.dropna()
+    _LOG.debug("Fitting on '%s' buckets", len(df))
+    # OLS with an intercept.
+    x = np.column_stack([np.ones(len(df)), df["flow"]])
+    y = df["ret"].to_numpy()
+    beta, _, _, _ = np.linalg.lstsq(x, y, rcond=None)
+    # Standard error of `gamma` from the residual variance.
+    resid = y - x @ beta
+    dof = len(y) - 2
+    cov = np.linalg.inv(x.T @ x) * (resid @ resid) / dof
+    r2 = 1 - (resid @ resid) / ((y - y.mean()) @ (y - y.mean()))
+    # Assemble the fit statistics.
+    fit = {
+        "gamma": float(beta[1]),
+        "gamma_t": float(beta[1] / np.sqrt(cov[1, 1])),
+        "r2": float(r2),
+        "n_obs": float(len(y)),
+    }
+    _LOG.debug("return=%s", fit)
+    return fit
 
 
 # #############################################################################
@@ -329,26 +398,61 @@ def calibrate(
 
 
 def compute_m1_table(
-    periods: Dict[str, Tuple[int, int]], n_episodes: int = 1000
+    periods: Dict[str, Tuple[int, int]],
+    *,
+    source: str = "taq",
+    n_episodes: int = 1000,
 ) -> pd.DataFrame:
     """
     Calibrate each period and compute the TWAP and sell-all shortfall.
 
+    The baselines use the Almgren et al. `gamma` and `eta`, and the half
+    spread measured on TAQ bars (0 on Alpaca bars). With TAQ bars, the
+    `gamma` fitted on the signed volume is reported for comparison only, since
+    it measures the whole market's flow, not one order.
+
     :param periods: period name to (first year, last year), e.g.,
-        `{"2016-2019": (2016, 2019)}`
+        `{"2015-2019": (2015, 2019)}`
+    :param source: `taq` or `alpaca`
     :param n_episodes: episodes per baseline
     :return: one column per period with the calibration and the shortfall
     """
-    _LOG.debug(hprint.to_str("periods n_episodes"))
+    _LOG.debug(hprint.to_str("periods source n_episodes"))
+    loaders: Dict[str, Callable[[int, int], pd.DataFrame]] = {
+        "taq": rltautil.load_spy_taq,
+        "alpaca": load_spy,
+    }
     # Use the environment defaults for the order size and the step count.
     total_shares = rlutils.DEFAULT_CONFIG["total_shares"]
     n_steps = rlutils.DEFAULT_CONFIG["n_steps"]
     columns = {}
     for name, (start_year, end_year) in periods.items():
+        _LOG.debug("Calibrating '%s' on '%s' bars", name, source)
         # Calibrate on the period's years.
-        params = calibrate(load_spy(start_year, end_year), n_steps, total_shares)
+        bars = loaders[source](start_year, end_year)
+        params = calibrate(bars, n_steps, total_shares)
         # Keep only the parameters that `ExecutionEnv` reads.
-        config = {k: params[k] for k in ("daily_vol", "adv", "s0", "gamma", "eta")}
+        keys = ("daily_vol", "adv", "s0", "gamma", "eta", "half_spread_bps")
+        config = {k: params[k] for k in keys}
+        # Format each metric as a display string for the table.
+        rows = {
+            "Trading days": f"{params['n_days']:.0f}",
+            "Open-to-close daily vol (%)": f"{100 * params['daily_vol']:.2f}",
+            "Avg daily volume (M shares)": f"{params['adv'] / 1e6:.1f}",
+            "Order as % of ADV": f"{params['shares_pct_adv']:.3f}",
+            "Half spread (bps)": f"{params['half_spread_bps']:.3f}",
+            "gamma, Almgren et al. (permanent)": f"{params['gamma']:.5f}",
+        }
+        # Fit `gamma` on the market's signed volume, for comparison only.
+        if source == "taq":
+            fit = fit_permanent_impact(bars, n_steps, params["adv"])
+            rows["gamma, fitted on TAQ (comparison only)"] = (
+                f"{fit['gamma']:.5f}"
+            )
+            rows["gamma fit: t-stat, R^2"] = (
+                f"{fit['gamma_t']:.1f}, {fit['r2']:.3f}"
+            )
+        rows["eta, Almgren et al. (temporary)"] = f"{params['eta']:.4f}"
         # Run both baselines on the same seeds, so they see the same paths.
         twap = rlutils.run_baseline(
             rlutils.twap_shares, config=config, n_episodes=n_episodes
@@ -356,21 +460,14 @@ def compute_m1_table(
         sell_all = rlutils.run_baseline(
             rlutils.sell_all_shares, config=config, n_episodes=n_episodes
         )
-        # Format each metric as a display string for the table.
-        columns[name] = {
-            "Trading days": f"{params['n_days']:.0f}",
-            "Open-to-close daily vol (%)": f"{100 * params['daily_vol']:.2f}",
-            "Avg daily volume (M shares)": f"{params['adv'] / 1e6:.1f}",
-            "Order as % of ADV": f"{params['shares_pct_adv']:.3f}",
-            "gamma (permanent)": f"{params['gamma']:.5f}",
-            "eta (temporary)": f"{params['eta']:.4f}",
-            "TWAP shortfall, mean ± std (bps)": (
-                f"{twap.mean():.2f} ± {twap.std():.2f}"
-            ),
-            "Sell-all shortfall, mean ± std (bps)": (
-                f"{sell_all.mean():.2f} ± {sell_all.std():.2f}"
-            ),
-        }
+        # Add the shortfall of both baselines.
+        rows["TWAP shortfall, mean ± std (bps)"] = (
+            f"{twap.mean():.2f} ± {twap.std():.2f}"
+        )
+        rows["Sell-all shortfall, mean ± std (bps)"] = (
+            f"{sell_all.mean():.2f} ± {sell_all.std():.2f}"
+        )
+        columns[name] = rows
     # One row per metric and one column per period.
     df = pd.DataFrame(columns)
     _LOG.debug("return=\n%s", df)

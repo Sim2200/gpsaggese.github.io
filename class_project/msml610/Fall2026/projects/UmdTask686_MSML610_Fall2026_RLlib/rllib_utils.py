@@ -42,6 +42,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "eta": 0.1,
     # Permanent impact per unit of traded fraction of daily volume.
     "gamma": 0.05,
+    # Half the bid-ask spread paid on every share sold, in bps of the price.
+    "half_spread_bps": 0.0,
     # Fractions of the remaining inventory that an action can sell.
     "action_fractions": (0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0),
 }
@@ -52,7 +54,8 @@ class ExecutionEnv(gym.Env):
     Liquidate `total_shares` in `n_steps` on a simulated price path.
 
     At step t, selling `n_t` shares with traded fraction `f_t = n_t / adv`:
-    - executes at `S_t * (1 - eta * f_t)` (temporary impact)
+    - executes at `S_t * (1 - eta * f_t - half_spread)` (temporary impact and
+      half the bid-ask spread)
     - moves the price to `S_t * (1 - gamma * f_t)` (permanent impact), then a
       log-normal shock with volatility `daily_vol / sqrt(n_steps)`
 
@@ -82,6 +85,7 @@ class ExecutionEnv(gym.Env):
         self.adv = float(cfg["adv"])
         self.eta = float(cfg["eta"])
         self.gamma = float(cfg["gamma"])
+        self.half_spread = float(cfg["half_spread_bps"]) / 1e4
         self.action_fractions = np.asarray(cfg["action_fractions"], dtype=float)
         # Scale the daily volatility to one step, assuming i.i.d. returns.
         self.step_vol = self.daily_vol / np.sqrt(self.n_steps)
@@ -152,9 +156,10 @@ class ExecutionEnv(gym.Env):
         # Sell everything left at the last step.
         if self.t == self.n_steps - 1:
             shares = self.inventory
-        # Compute the execution price with the temporary impact.
+        # Compute the execution price with the temporary impact and the
+        # spread.
         frac = shares / self.adv
-        exec_price = self.price * (1.0 - self.eta * frac)
+        exec_price = self.price * (1.0 - self.eta * frac - self.half_spread)
         # Measure the cost against the arrival price, in bps of the arrival
         # value.
         cost = (self.s0 - exec_price) * shares
