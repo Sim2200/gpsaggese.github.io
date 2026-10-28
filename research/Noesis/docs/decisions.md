@@ -245,7 +245,7 @@
 - **Boundary**: scales support representative large-value tests, not all numerical
   extremes. Arbitrarily large floats and fractional-price precision are not proven.
 
-### D-18. Validate Regimes Across Seeds Until M10 Is Available
+### D-18. Validate Regimes Directly and Through the Market Runner
 
 - **Decision**: validate each named family across multiple seeds, counts, and
   numeric scales using `OrderBook.clear_round()` and deterministic mock dispatch.
@@ -258,8 +258,9 @@
 - **Why**: exact outcomes vary with seed, but the scenario's defining properties
   must hold for every supported configuration. These checks exercise the existing
   auction without duplicating M10 orchestration.
-- **Status**: integration through M10's `run_round()` remains pending. This does
-  not waive that original acceptance criterion or establish live-provider delivery.
+- **Status**: focused M10 integration tests exercise all five named families
+  through `run_round()`; the larger direct-auction matrix remains unchanged.
+  These checks do not establish live-provider delivery or backend parity.
 
 ## Market Mechanism (MVP)
 
@@ -341,9 +342,33 @@
   a thread that polls OpenRouter on a timer (adds a second clock next to the
   scheduler's).
 
+## Library Market Rounds (PR_M10)
+
+### D-29. Own Round Orchestration and Storage Interfaces in the Market
+
+- **Decision**: `market/round_runner.py` owns `run_round()`, `RoundResult`,
+  `RoundSummary`, `ContractStore`, and `InMemoryContractStore`. The runner reuses
+  auction clearing, contract construction, and dispatch rather than duplicating
+  those implementations. All three runner arguments are required.
+- **Why**: notebooks and Python callers must operate the market without importing
+  FastAPI or a concrete database backend. HTTP models stay in `platform_api.py`;
+  PostgreSQL implements the plain market interface in the platform component.
+- **Round identity**: the store allocates one id after clearing, shared by every
+  tier summary. Empty rounds also consume an id, matching the prior API behavior.
+- **Residuals**: snapshot orders before clearing; allocate fill totals by tier and
+  participant in stable auction price priority. Return copied orders with positive
+  remaining quantities. Repeated participant ids do not mix quantities across tiers.
+- **Alternatives**: moving HTTP response models into the market retains the
+  dependency; reconstructing orchestration separately in notebooks duplicates the
+  API workflow; returning original partial orders overstates unmatched volume.
+- **Limits**: preserve synchronous fulfillment, store-assigned contract ids,
+  exception propagation, and the existing non-atomic sequence of clear, dispatch,
+  and saves. This change does not add scheduling, rollback, requeueing, or real
+  fulfillment, and retains `build_contracts()`'s buyer-id term assumption.
+
 ## Credit Ledger (PR_P4)
 
-### D-28. A Bid Must Be Covered at Submission, but Credit Is Debited at Clearing
+### D-30. A Bid Must Be Covered at Submission, but Credit Is Debited at Clearing
 
 - **Decision**: `POST /bids` is rejected (HTTP 400) unless the caller's balance
   covers `n_tasks * p_max`; nothing is held. Credit is debited only when a
@@ -359,7 +384,7 @@
   on clearing (needs cancels and refunds); debit at `p_max` (overcharges the
   buyer).
 
-### D-29. The Free Grant Is a Setting, Not a Number in the Repo
+### D-31. The Free Grant Is a Setting, Not a Number in the Repo
 
 - **Decision**: every account receives the same free credit on its first bid,
   read from `NOESIS_FREE_CREDIT` (default `1.0` in `market/credit_ledger.py`).
