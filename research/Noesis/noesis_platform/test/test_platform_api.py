@@ -857,6 +857,49 @@ class Test_credit_gate(hunitest.TestCase):
         )
         self.assert_equal(actual, expected)
 
+    def test4(self) -> None:
+        """
+        Test that a `buyer_id` already bound to another account in the round
+        is rejected with an HTTP 400.
+        """
+        # Prepare inputs.
+        ledger = rnmacrle.CreditLedger(free_credit=100.0)
+        order_book = rnbacaau.OrderBook()
+        gateway = rnopapro.Gateway()
+        api_keys = {"key_a": "acct_a", "key_b": "acct_b"}
+        app = rnoplapi.create_app(
+            order_book, gateway, api_keys, credit_ledger=ledger
+        )
+        test_client = fastapi.testclient.TestClient(app)
+        bid_payload = {
+            "buyer_id": "buyer_1",
+            "n_tasks": 1,
+            "c_level_min": "frontier",
+            "l_max": 2.0,
+            "r_min": 0.999,
+            "p_max": 1.0,
+        }
+        # Prepare outputs.
+        expected = "first=201 second=400 pending_bids=1"
+        # Run test.
+        first = test_client.post(
+            "/bids",
+            json=bid_payload,
+            headers={rnoplapi.API_KEY_HEADER: "key_a"},
+        )
+        second = test_client.post(
+            "/bids",
+            json=bid_payload,
+            headers={rnoplapi.API_KEY_HEADER: "key_b"},
+        )
+        # Check outputs.
+        pending = len(order_book.get_pending_bids())
+        actual = (
+            f"first={first.status_code} second={second.status_code}"
+            f" pending_bids={pending}"
+        )
+        self.assert_equal(actual, expected)
+
 
 # #############################################################################
 # Test_health

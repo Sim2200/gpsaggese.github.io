@@ -107,7 +107,7 @@ else:
     contract_store = None
 
 api_keys = _parse_api_keys(os.environ.get("NOESIS_API_KEYS", ""))
-# The credit ledger is in-memory on both backends until `PR_P2`.
+# The credit ledger is in-memory on both backends until `PR_P2b`.
 free_credit = float(
     os.environ.get("NOESIS_FREE_CREDIT", rnmacrle.DEFAULT_FREE_CREDIT)
 )

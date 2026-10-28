@@ -363,7 +363,7 @@
 
 - **Decision**: every account receives the same free credit on its first bid,
   read from `NOESIS_FREE_CREDIT` (default `1.0` in `market/credit_ledger.py`).
-  The ledger is in-memory on both backends until PR_P2 adds a Postgres store.
+  The ledger is in-memory on both backends until PR_P2b adds a Postgres store.
   The ledger charges the account behind the API key, so a `buyer_id` is bound
   to one account per round.
 - **Why**: the grant is a deployment parameter, not a market rule, so it lives
@@ -372,4 +372,4 @@
   to know whom to debit.
 - **Alternatives**: a grant per tier or per account type (nothing in the PRD
   asks for it); store the account id on the contract (changes the `Contract`
-  schema that PR_P2 persists).
+  schema that PR_P2b persists).
